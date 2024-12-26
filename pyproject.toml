@@ -7,7 +7,9 @@ authors = [
     { name = "Mate Marjanović", email = "sharp.edged2@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "requests[socks]>=2.32.3",
+]
 
 [project.scripts]
 unthrottle = "unthrottle:main"
