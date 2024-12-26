@@ -11,6 +11,5 @@ class TorManager:
         
     def spawn_instance(self):
         i = len(self.instances)
-        port = 9050 + 100 * i
-        print(f"STARTING AT PORT {port}")
+        port = 9050 + i
         self.instances.append(TorInstance(port, self.config_template))
