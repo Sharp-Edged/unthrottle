@@ -5,3 +5,7 @@ def file_size_to_bytes(file_size: str) -> int:
     size = file_size.rstrip(string.ascii_letters)
     unit = file_size[len(size):]
     return int(float(size) * units[unit])
+
+def ceil_div(n: int, d: int) -> int:
+    # funny hack
+    return -(n // -d)

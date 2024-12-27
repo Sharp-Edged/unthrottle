@@ -1,17 +1,22 @@
 import cmd
 from tor import TorManager
+from config import DOWNLOAD_PATH, CHUNK_BYTES
+from utils import ceil_div
+import shutil
 
 class Cli(cmd.Cmd):
     prompt = "> "
     intro = "Welcome to the unthrottle CLI. Type ? to list commands."
     tor_manager: TorManager
     open_url: str
-    file_size_bytes: int
+    file_size_bytes: int | None = None
+    chunks: list[tuple[int, int]]
 
     def __init__(self, open_url):
         super().__init__()
         self.open_url = open_url
         self.tor_manager = TorManager(open_url)
+        DOWNLOAD_PATH.mkdir(exist_ok=True)
 
     def do_ls(self, arg):
         """
@@ -40,7 +45,16 @@ class Cli(cmd.Cmd):
         """
         Start the download. (Should this even exist?)
         """
-        print("dl...")
+        self.tor_manager.run(CHUNK_BYTES * 4)
+
+    def do_cl(self, arg):
+        """
+        Clears all the downloaded chunks.
+        Should be called every time you change the file you are downloading.
+        """
+        # Slightly nasty but IDC rn :shrug:
+        shutil.rmtree(DOWNLOAD_PATH)
+        DOWNLOAD_PATH.mkdir()
 
     def do_help(self, arg):
         if arg:
@@ -57,7 +71,8 @@ class Cli(cmd.Cmd):
             print("Available commands:")
             print("  ls          List all active tor instances")
             print("  sp          Spawn a new tor instance")
-            print("  dl          Start the download")
+            print("  dl [size]   Start to download the first <size> bytes of the file.")
+            print("  cl          Clear all the downloaded chunks")
             print("  help [cmd]  Show help information for <cmd>")
             print("  exit        Exit this shell")
 
