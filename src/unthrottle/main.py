@@ -1,6 +1,5 @@
-from time import sleep
 from tor import TorManager
-from config import FIREFOX_PROFILE_PATH
+from .cli import Cli
 import subprocess
 import argparse
 import shutil
@@ -18,12 +17,16 @@ def main():
         exit(2)
 
     argparser = argparse.ArgumentParser("unthrottle")
-    argparser.add_argument("url", help="URL where the the download URL is located.", type=str)
+    argparser.add_argument("open_url", help="URL where the the download URL is located.", type=str)
 
     args = argparser.parse_args()
 
-    tor_manager = TorManager()
-    tor_manager.spawn_instance()
+    # tor_manager = TorManager()
+
+    # Game
+    cli = Cli(open_url=args.open_url)
+    cli.cmdloop()
     # tor_manager.spawn_instance()
-    tor_manager.instances[0].open_chromium(args.url)
-    # print(tor_manager.instances[1].get("https://httpbin.org/ip"))
+    # # tor_manager.spawn_instance()
+    # tor_manager.instances[0].open_chromium(args.url)
+    # # print(tor_manager.instances[1].get("https://httpbin.org/ip"))

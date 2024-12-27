@@ -12,8 +12,9 @@ class TorInstance:
     proxy: str
     config_file: Path
     data_dir: Path
+    url: str
 
-    def __init__(self, port: int, config_file_template: str):
+    def __init__(self, port: int, config_file_template: str, open_url: str):
         self.port = port
         self.proxy = f"socks5://127.0.0.1:{port}"
 
@@ -34,16 +35,23 @@ class TorInstance:
             if b"(ready)" in line:
                 break
 
-    def get(self, url: str) -> str:
+        # Acquire the actual url
+        self.acquire_url(open_url)
+
+    def content_length(self) -> int:
         sess = requests.session()
         sess.proxies = {
             "http": self.proxy,
             "https": self.proxy
         }
-        return sess.get(url).text
+        return int(sess.head(self.url).headers["Content-Length"])
 
     def open_chromium(self, url):
         subprocess.run(shlex.split(f"chromium --proxy-server=\"{self.proxy}\" {url}"))
+
+    def acquire_url(self, open_url):
+        self.open_chromium(open_url)
+        self.url = input("Enter the download link: ")
 
     def __del__(self):
         self.instance.terminate()
