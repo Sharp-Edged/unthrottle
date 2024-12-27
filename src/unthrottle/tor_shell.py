@@ -1,35 +1,51 @@
+import asyncio
 import cmd
+cmd.Cmd
 from tor import TorManager
-from config import DOWNLOAD_PATH, CHUNK_BYTES
-from utils import ceil_div
+from config import DOWNLOAD_PATH
+from prompt_toolkit import PromptSession
 import shutil
 
-class Cli(cmd.Cmd):
+class TorShell:
     prompt = "> "
     intro = "Welcome to the unthrottle CLI. Type ? to list commands."
-    tor_manager: TorManager
-    open_url: str
-    file_size_bytes: int | None = None
-    chunks: list[tuple[int, int]]
 
-    def __init__(self, open_url):
-        super().__init__()
-        self.open_url = open_url
+    tor_manager: TorManager
+
+    session: PromptSession
+    running: bool
+
+    def __init__(self, open_url: str):
+        print(self.intro)
+
         self.tor_manager = TorManager(open_url)
+        self.session = PromptSession()
+        self.running = True
         DOWNLOAD_PATH.mkdir(exist_ok=True)
 
-    def do_ls(self, arg):
+    async def cmd_loop(self):
+        while self.running:
+            try:
+                cmd = await self.session.prompt_async(self.prompt)
+                await self.run_cmd(cmd)
+            except (EOFError, KeyboardInterrupt):
+                print("Exiting...")
+                break
+
+    async def run_cmd(self, cmd: str):
+        func = getattr(self, "do_" + cmd, None)
+        if func:
+            await func()
+        else:
+            print("No such function.")
+
+    async def do_ls(self):
         """
         List all running tor instances.
         """
-        if len(self.tor_manager.instances) == 0:
-            print("No currently running tor instances.")
-        else:
-            print("Currently running instances:")
-            for instance in self.tor_manager.instances:
-                print(instance.proxy)
+        self.tor_manager.list_instances()
 
-    def do_sp(self, arg):
+    async def do_sp(self):
         """
         Spawns a new tor instance.
         After spawning, opens Chromium at the provided URL using it as a proxy.
@@ -37,23 +53,15 @@ class Cli(cmd.Cmd):
         Copy the download URL and close chromium.
         Paste the copied link into the prompt.
         """
-        self.tor_manager.spawn_instance()
-        if not self.file_size_bytes:
-            self.file_size_bytes = self.tor_manager.instances[0].content_length()
+        await self.tor_manager.spawn_instance()
 
-    def do_dl(self, arg):
-        """
-        Start the download. (Should this even exist?)
-        """
-        self.tor_manager.run(CHUNK_BYTES * 4)
-
-    def do_cl(self, arg):
+    async def do_cl(self):
         """
         Clears all the downloaded chunks.
         Should be called every time you change the file you are downloading.
         """
         # Slightly nasty but IDC rn :shrug:
-        shutil.rmtree(DOWNLOAD_PATH)
+        shutil.rmtree(DOWNLOAD_PATH) # await?
         DOWNLOAD_PATH.mkdir()
 
     def do_help(self, arg):
@@ -71,11 +79,15 @@ class Cli(cmd.Cmd):
             print("Available commands:")
             print("  ls          List all active tor instances")
             print("  sp          Spawn a new tor instance")
-            print("  dl [size]   Start to download the first <size> bytes of the file.")
             print("  cl          Clear all the downloaded chunks")
             print("  help [cmd]  Show help information for <cmd>")
             print("  exit        Exit this shell")
 
-    def do_exit(self, arg) -> bool:
+    async def do_wait(self):
+        self.tor_manager.wait_for_tasks()
+
+    async def do_exit(self):
+        self.running = False
+        # RAII 4 life
+        await self.tor_manager.terminate()
         print("Exiting...")
-        return True

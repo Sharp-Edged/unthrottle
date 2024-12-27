@@ -1,14 +1,12 @@
-from tor import TorManager
-from .cli import Cli
-import subprocess
+from .tor_shell import TorShell
 import argparse
 import shutil
-import shlex
-
-def run_cmd(cmd) -> int:
-    return subprocess.run(shlex.split(cmd)).returncode
+import asyncio
 
 def main():
+    asyncio.run(async_main())
+
+async def async_main():
     if not shutil.which("chromium"):
         print("You need to have chromium to run this program.")
         exit(1)
@@ -21,12 +19,6 @@ def main():
 
     args = argparser.parse_args()
 
-    # tor_manager = TorManager()
-
     # Game
-    cli = Cli(open_url=args.open_url)
-    cli.cmdloop()
-    # tor_manager.spawn_instance()
-    # # tor_manager.spawn_instance()
-    # tor_manager.instances[0].open_chromium(args.url)
-    # # print(tor_manager.instances[1].get("https://httpbin.org/ip"))
+    cmd = TorShell(open_url=args.open_url)
+    await cmd.cmd_loop()

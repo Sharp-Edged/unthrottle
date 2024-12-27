@@ -1,12 +1,18 @@
+from __future__ import annotations
 from string import Template
 from subprocess import Popen
 import subprocess
 from config import TOR_DATAS_PATH, TOR_CONFIGS_PATH, CHUNK_BYTES, DOWNLOAD_PATH
 from pathlib import Path
-from threading import Lock
 from tqdm import tqdm
+from typing import TYPE_CHECKING
 import shlex
-import requests
+import httpx
+import aiofiles
+
+# :vomit:
+if TYPE_CHECKING:
+    from . import TorManager
 
 class TorInstance:
     instance: Popen
@@ -15,10 +21,15 @@ class TorInstance:
     config_file: Path
     data_dir: Path
     url: str
+    client: httpx.AsyncClient
+    manager: TorManager
 
-    def __init__(self, port: int, config_file_template: str, open_url: str):
+    @classmethod
+    async def create(cls, port: int, config_file_template: str, open_url: str, manager: TorManager) -> TorInstance:
+        self = cls()
         self.port = port
         self.proxy = f"socks5://127.0.0.1:{port}"
+        self.manager = manager
 
         # Make tor data directory
         self.data_dir = TOR_DATAS_PATH / f"tor.{port}"
@@ -39,43 +50,39 @@ class TorInstance:
                 if b"(ready)" in line:
                     break
 
+            self.client = httpx.AsyncClient(proxy=self.proxy)
+
             if self.acquire_url(open_url):
                 # Successfuly acquired the URL
                 break
+
             # Didn't acquire the URL, kill tor instance and try again.
             self.instance.terminate()
+            await self.client.aclose()
+        return self
 
-    def run(self, size_bytes: int, chunk_id: list[int], chunk_id_lock: Lock, pbar: tqdm | None):
+    # Disgusting shared state via [chunk_id] (???) TODO: Avoid vomit
+    async def run(self, size_bytes: int, pbar: tqdm | None = None):
         while True:
-            with chunk_id_lock:
-                my_chunk_id = chunk_id[0]
-                chunk_id[0] += 1
-            low = my_chunk_id * CHUNK_BYTES
+            chunk_id = self.manager.chunk_id
+            self.manager.chunk_id += 1
+
+            low = chunk_id * CHUNK_BYTES
             if low >= size_bytes:
                 break
             rng = (low, min(size_bytes, low + CHUNK_BYTES) - 1)
-            data = self.get_range(rng)
-            with open(DOWNLOAD_PATH / f"chunk.{my_chunk_id}", "wb") as f:
-                f.write(data)
+            data = await self.get_range(rng)
+            async with aiofiles.open(DOWNLOAD_PATH / f"chunk.{chunk_id}", "wb") as f:
+                await f.write(data)
 
             if pbar:
                 pbar.update(rng[1] - rng[0] + 1)
 
-    def content_length(self) -> int:
-        sess = requests.session()
-        sess.proxies = {
-            "http": self.proxy,
-            "https": self.proxy
-        }
-        return int(sess.head(self.url).headers["Content-Length"])
+    async def content_length(self) -> int:
+        return int((await self.client.head(self.url)).headers["Content-Length"])
 
-    def get_range(self, rng: tuple[int, int]) -> bytes:
-        sess = requests.session()
-        sess.proxies = {
-            "http": self.proxy,
-            "https": self.proxy
-        }
-        return sess.get(self.url, headers={"Range": f"bytes={rng[0]}-{rng[1]}"}).content
+    async def get_range(self, rng: tuple[int, int]) -> bytes:
+        return (await self.client.get(self.url, headers={"Range": f"bytes={rng[0]}-{rng[1]}"})).content
 
     def open_chromium(self, url):
         subprocess.run(shlex.split(f"chromium --proxy-server=\"{self.proxy}\" {url}"))
@@ -85,5 +92,6 @@ class TorInstance:
         self.url = input("Enter the download link (or press Enter to retry): ")
         return self.url != ""
 
-    def __del__(self):
+    async def terminate(self):
         self.instance.terminate()
+        await self.client.aclose()
