@@ -1,42 +1,53 @@
+from typing import Iterator
 from . import TorInstance
 from config import TORRC_TEMPLATE_PATH, CHUNK_BYTES
-from tqdm import tqdm
 from utils import ceil_div
+from prompt_toolkit.shortcuts import ProgressBar
+from contextlib import AsyncExitStack
 import asyncio
 
 class TorManager:
     instances: list[TorInstance]
     config_template: str
     open_url: str
+    progress_bar: ProgressBar
     # Next chunk to download
-    chunk_id: int = 0
+    remaining_chunks: Iterator[int]
     tasks: list[asyncio.Task] = []
     file_size_bytes: int = -1
-    progress_bar: tqdm
 
-    def __init__(self, open_url):
+    _astack: AsyncExitStack
+
+    def __init__(self, open_url: str):
         self.instances = []
         self.config_template = open(TORRC_TEMPLATE_PATH, "r").read()
         self.open_url = open_url
 
-    async def terminate(self):
-        for instance in self.instances:
-            await instance.terminate()
+    async def __aenter__(self):
+        async with AsyncExitStack() as astack:
+            # self.progress_bar = astack.enter_context(ProgressBar())
+            self._astack = astack.pop_all()
+        return self
+
+    async def __aexit__(self, *args):
+        await self._astack.aclose()
         
     async def spawn_instance(self):
         i = len(self.instances)
         port = 9050 + i
-        instance = await TorInstance.create(port, self.config_template, self.open_url, self)
+        instance = await self._astack.enter_async_context(TorInstance(port, self.config_template, self.open_url))
 
         # First instance
         if self.instances == []:
             self.file_size_bytes = await instance.content_length()
-            self.progress_bar = tqdm(total=self.file_size_bytes, desc="Downloading", unit="bytes")
+            num_chunks = ceil_div(self.file_size_bytes, CHUNK_BYTES)
+            self.remaining_chunks = iter(self.progress_bar(range(num_chunks)))
 
         self.instances.append(instance)
-        self.tasks += [asyncio.create_task(instance.run(self.file_size_bytes, self.progress_bar))]
+        self.tasks += [asyncio.create_task(instance.run(self.remaining_chunks, self.file_size_bytes))]
 
     def list_instances(self):
+        print("HERE")
         if self.instances == []:
             print("No currently running tor instances.")
         else:
@@ -44,22 +55,6 @@ class TorManager:
             for instance in self.instances:
                 print(instance.proxy)
 
-    def wait_for_tasks(self):
+    async def wait_for_tasks(self):
         if self.tasks != []:
-            asyncio.gather(*self.tasks)
-
-    # async def run(self, size_bytes: int):
-    #     "Runs all the instances in parallel, downloading the first 'size_bytes' bytes of the file."
-    #     chunk_id = [0]
-    #     chunk_id_lock = Lock()
-    #     
-    #     with tqdm(total=size_bytes, desc="Downloading", unit="bytes") as pbar:
-    #         threads: list[Thread] = []
-    #         for instance in self.instances:
-    #             thread = Thread(target=instance.run, args=[size_bytes, chunk_id, chunk_id_lock, pbar])
-    #             thread.start()
-    #             threads += [thread]
-    #
-    #         for thread in threads:
-    #             thread.join()
-
+            await asyncio.gather(*self.tasks)

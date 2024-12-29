@@ -1,11 +1,13 @@
 from __future__ import annotations
+import asyncio
+from asyncio.subprocess import Process
 from string import Template
 from subprocess import Popen
 import subprocess
 from config import TOR_DATAS_PATH, TOR_CONFIGS_PATH, CHUNK_BYTES, DOWNLOAD_PATH
 from pathlib import Path
-from tqdm import tqdm
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterator
+from contextlib import AsyncExitStack
 import shlex
 import httpx
 import aiofiles
@@ -15,21 +17,21 @@ if TYPE_CHECKING:
     from . import TorManager
 
 class TorInstance:
-    instance: Popen
+    instance: Process
     port: int
     proxy: str
     config_file: Path
     data_dir: Path
+    open_url: str
     url: str
     client: httpx.AsyncClient
-    manager: TorManager
 
-    @classmethod
-    async def create(cls, port: int, config_file_template: str, open_url: str, manager: TorManager) -> TorInstance:
-        self = cls()
+    _astack: AsyncExitStack
+
+    def __init__(self, port: int, config_file_template: str, open_url: str):
         self.port = port
         self.proxy = f"socks5://127.0.0.1:{port}"
-        self.manager = manager
+        self.open_url = open_url
 
         # Make tor data directory
         self.data_dir = TOR_DATAS_PATH / f"tor.{port}"
@@ -38,45 +40,55 @@ class TorInstance:
         # Make tor config file
         self.config_file = TOR_CONFIGS_PATH / f"torrc.{port}"
         config = Template(config_file_template).substitute({ "port": port, "data_dir": self.data_dir.absolute() })
-        self.config_file.write_text(config)
+        self.config_file.write_text(config) # async?
 
-        # Keep trying to acquire a tor instance and the proper download URL.
-        while True:
-            # Run the tor instance
-            self.instance = Popen(["tor", "-f", self.config_file.absolute()], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    async def __aenter__(self):
+        async with AsyncExitStack() as astack:
+            # Keep trying to acquire a Tor instance and the proper download URL.
+            while True:
+                async with AsyncExitStack() as astack_inner:
+                    # 1) Run the Tor instance
+                    self.instance = await asyncio.create_subprocess_exec("tor", "-f", self.config_file.absolute(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+                    astack_inner.callback(self.instance.terminate)
 
-            # Wait until it has properly setup the proxy.
-            for line in self.instance.stdout: # What is this retarded LSP error?
-                if b"(ready)" in line:
-                    break
+                    # 2) Wait until Tor is 'Ready'
+                    while True:
+                        line = await self.instance.stdout.readline()
+                        if not line:
+                            print("Wtf lol?")
+                            exit(64)
+                        if b"(ready)" in line:
+                            break
 
-            self.client = httpx.AsyncClient(proxy=self.proxy)
+                    self.client = await astack_inner.enter_async_context(httpx.AsyncClient(proxy=self.proxy))
 
-            if self.acquire_url(open_url):
-                # Successfuly acquired the URL
-                break
-
-            # Didn't acquire the URL, kill tor instance and try again.
-            self.instance.terminate()
-            await self.client.aclose()
+                    # 3) Try to acquire the URL
+                    if self.acquire_url(self.open_url):
+                        # Successfuly acquired the URL
+                        # TODO: Hmm...
+                        astack_inner.pop_all()
+                        astack.push_async_exit(self.client)
+                        astack.callback(self.instance.terminate)
+                        break
+            self._astack = astack.pop_all()
         return self
 
-    # Disgusting shared state via [chunk_id] (???) TODO: Avoid vomit
-    async def run(self, size_bytes: int, pbar: tqdm | None = None):
+    async def __aexit__(self, *args):
+        await self._astack.aclose()
+
+    # Start downloading file at self.url in chunks.
+    async def run(self, remaining_chunks: Iterator[int], size_bytes: int):
         while True:
-            chunk_id = self.manager.chunk_id
-            self.manager.chunk_id += 1
+            chunk_id = next(remaining_chunks)
 
             low = chunk_id * CHUNK_BYTES
             if low >= size_bytes:
                 break
             rng = (low, min(size_bytes, low + CHUNK_BYTES) - 1)
+
             data = await self.get_range(rng)
             async with aiofiles.open(DOWNLOAD_PATH / f"chunk.{chunk_id}", "wb") as f:
                 await f.write(data)
-
-            if pbar:
-                pbar.update(rng[1] - rng[0] + 1)
 
     async def content_length(self) -> int:
         return int((await self.client.head(self.url)).headers["Content-Length"])
@@ -91,7 +103,3 @@ class TorInstance:
         self.open_chromium(open_url)
         self.url = input("Enter the download link (or press Enter to retry): ")
         return self.url != ""
-
-    async def terminate(self):
-        self.instance.terminate()
-        await self.client.aclose()

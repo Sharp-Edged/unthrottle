@@ -1,14 +1,13 @@
-import asyncio
-import cmd
-cmd.Cmd
+from prompt_toolkit.shortcuts import print_formatted_text as print
 from tor import TorManager
 from config import DOWNLOAD_PATH
 from prompt_toolkit import PromptSession
 import shutil
 
-class TorShell:
+"""Main async shell for running the program."""
+class UnthrottleShell:
     prompt = "> "
-    intro = "Welcome to the unthrottle CLI. Type ? to list commands."
+    intro = "Welcome to the Unthrottle shell. Type ? to list commands."
 
     tor_manager: TorManager
 
@@ -18,15 +17,23 @@ class TorShell:
     def __init__(self, open_url: str):
         print(self.intro)
 
-        self.tor_manager = TorManager(open_url)
-        self.session = PromptSession()
+        self.session = PromptSession(self.prompt)
         self.running = True
         DOWNLOAD_PATH.mkdir(exist_ok=True)
+
+        self.tor_manager = TorManager(open_url)
+
+    async def __aenter__(self):
+        await self.tor_manager.__aenter__()
+        return self
+
+    async def __aexit__(self, *args):
+        await self.tor_manager.__aexit__(*args)
 
     async def cmd_loop(self):
         while self.running:
             try:
-                cmd = await self.session.prompt_async(self.prompt)
+                cmd = await self.session.prompt_async()
                 await self.run_cmd(cmd)
             except (EOFError, KeyboardInterrupt):
                 print("Exiting...")
@@ -84,10 +91,8 @@ class TorShell:
             print("  exit        Exit this shell")
 
     async def do_wait(self):
-        self.tor_manager.wait_for_tasks()
+        await self.tor_manager.wait_for_tasks()
 
     async def do_exit(self):
         self.running = False
-        # RAII 4 life
-        await self.tor_manager.terminate()
         print("Exiting...")
