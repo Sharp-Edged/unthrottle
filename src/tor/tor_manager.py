@@ -2,15 +2,14 @@ from typing import Iterator
 from . import TorInstance
 from config import TORRC_TEMPLATE_PATH, CHUNK_BYTES
 from utils import ceil_div
-from prompt_toolkit.shortcuts import ProgressBar
 from contextlib import AsyncExitStack
+from rich.progress import track
 import asyncio
 
 class TorManager:
     instances: list[TorInstance]
     config_template: str
     open_url: str
-    progress_bar: ProgressBar
     # Next chunk to download
     remaining_chunks: Iterator[int]
     tasks: list[asyncio.Task] = []
@@ -24,9 +23,7 @@ class TorManager:
         self.open_url = open_url
 
     async def __aenter__(self):
-        async with AsyncExitStack() as astack:
-            # self.progress_bar = astack.enter_context(ProgressBar())
-            self._astack = astack.pop_all()
+        self._astack = await AsyncExitStack().__aenter__()
         return self
 
     async def __aexit__(self, *args):
@@ -41,7 +38,8 @@ class TorManager:
         if self.instances == []:
             self.file_size_bytes = await instance.content_length()
             num_chunks = ceil_div(self.file_size_bytes, CHUNK_BYTES)
-            self.remaining_chunks = iter(self.progress_bar(range(num_chunks)))
+            # self.remaining_chunks = iter(track(range(num_chunks)))
+            self.remaining_chunks = iter(range(num_chunks))
 
         self.instances.append(instance)
         self.tasks += [asyncio.create_task(instance.run(self.remaining_chunks, self.file_size_bytes))]

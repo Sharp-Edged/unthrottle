@@ -11,6 +11,7 @@ from contextlib import AsyncExitStack
 import shlex
 import httpx
 import aiofiles
+from utils import ainput
 
 # :vomit:
 if TYPE_CHECKING:
@@ -63,7 +64,7 @@ class TorInstance:
                     self.client = await astack_inner.enter_async_context(httpx.AsyncClient(proxy=self.proxy))
 
                     # 3) Try to acquire the URL
-                    if self.acquire_url(self.open_url):
+                    if await self.acquire_url(self.open_url):
                         # Successfuly acquired the URL
                         # TODO: Hmm...
                         astack_inner.pop_all()
@@ -79,11 +80,12 @@ class TorInstance:
     # Start downloading file at self.url in chunks.
     async def run(self, remaining_chunks: Iterator[int], size_bytes: int):
         while True:
-            chunk_id = next(remaining_chunks)
+            try:
+                chunk_id = next(remaining_chunks)
+            except StopIteration:
+                break
 
             low = chunk_id * CHUNK_BYTES
-            if low >= size_bytes:
-                break
             rng = (low, min(size_bytes, low + CHUNK_BYTES) - 1)
 
             data = await self.get_range(rng)
@@ -97,9 +99,10 @@ class TorInstance:
         return (await self.client.get(self.url, headers={"Range": f"bytes={rng[0]}-{rng[1]}"})).content
 
     def open_chromium(self, url):
-        subprocess.run(shlex.split(f"chromium --proxy-server=\"{self.proxy}\" {url}"))
+        # subprocess.run(shlex.split(f"chromium --proxy-server=\"{self.proxy}\" {url}"))
+        pass
 
-    def acquire_url(self, open_url) -> bool:
+    async def acquire_url(self, open_url) -> bool:
         self.open_chromium(open_url)
-        self.url = input("Enter the download link (or press Enter to retry): ")
+        self.url = await ainput("Enter the download link (or press Enter to retry): ")
         return self.url != ""

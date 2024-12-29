@@ -1,7 +1,7 @@
-from prompt_toolkit.shortcuts import print_formatted_text as print
+import asyncio
 from tor import TorManager
 from config import DOWNLOAD_PATH
-from prompt_toolkit import PromptSession
+from utils import ainput
 import shutil
 
 """Main async shell for running the program."""
@@ -11,13 +11,11 @@ class UnthrottleShell:
 
     tor_manager: TorManager
 
-    session: PromptSession
     running: bool
 
     def __init__(self, open_url: str):
         print(self.intro)
 
-        self.session = PromptSession(self.prompt)
         self.running = True
         DOWNLOAD_PATH.mkdir(exist_ok=True)
 
@@ -33,7 +31,7 @@ class UnthrottleShell:
     async def cmd_loop(self):
         while self.running:
             try:
-                cmd = await self.session.prompt_async()
+                cmd = await ainput(self.prompt)
                 await self.run_cmd(cmd)
             except (EOFError, KeyboardInterrupt):
                 print("Exiting...")
@@ -71,7 +69,7 @@ class UnthrottleShell:
         shutil.rmtree(DOWNLOAD_PATH) # await?
         DOWNLOAD_PATH.mkdir()
 
-    def do_help(self, arg):
+    async def do_help(self, arg):
         if arg:
             try:
                 func = getattr(self, 'do_' + arg)

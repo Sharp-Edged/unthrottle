@@ -1,4 +1,5 @@
 import string
+import asyncio
 
 def file_size_to_bytes(file_size: str) -> int:
     units = { "B": 1, "KB": 10**3, "MB": 10**6, "KiB": 2**10, "MiB": 2**20}
@@ -9,3 +10,6 @@ def file_size_to_bytes(file_size: str) -> int:
 def ceil_div(n: int, d: int) -> int:
     # funny hack
     return -(n // -d)
+
+async def ainput(prompt: str = "") -> str:
+    return await asyncio.to_thread(input, prompt)

@@ -1,8 +1,8 @@
 from .unthrottle_shell import UnthrottleShell
-from prompt_toolkit.patch_stdout import patch_stdout
 import argparse
 import shutil
 import asyncio
+import logging
 
 def main():
     asyncio.run(async_main())
@@ -21,6 +21,5 @@ async def async_main():
     args = argparser.parse_args()
 
     # Game
-    with patch_stdout():
-        async with UnthrottleShell(open_url=args.open_url) as shell:
-            await shell.cmd_loop()
+    async with UnthrottleShell(open_url=args.open_url) as shell:
+        await shell.cmd_loop()
