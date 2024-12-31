@@ -2,16 +2,13 @@ from __future__ import annotations
 import asyncio
 from asyncio.subprocess import Process
 from string import Template
-from subprocess import Popen
-import subprocess
 from config import TOR_DATAS_PATH, TOR_CONFIGS_PATH, CHUNK_BYTES, DOWNLOAD_PATH
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 from contextlib import AsyncExitStack
-import shlex
 import httpx
 import aiofiles
-from utils import ainput
+from prompt_toolkit.shortcuts import PromptSession
 
 # :vomit:
 if TYPE_CHECKING:
@@ -50,7 +47,11 @@ class TorInstance:
                 async with AsyncExitStack() as astack_inner:
                     # 1) Run the Tor instance
                     self.instance = await asyncio.create_subprocess_exec("tor", "-f", self.config_file.absolute(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
-                    astack_inner.callback(self.instance.terminate)
+                    async def terminate_and_wait(process: Process):
+                        if process.returncode is None:
+                            process.terminate()
+                            await process.wait()
+                    astack_inner.push_async_callback(terminate_and_wait, self.instance)
 
                     # 2) Wait until Tor is 'Ready'
                     while True:
@@ -69,13 +70,13 @@ class TorInstance:
                         # TODO: Hmm...
                         astack_inner.pop_all()
                         astack.push_async_exit(self.client)
-                        astack.callback(self.instance.terminate)
+                        astack.push_async_callback(terminate_and_wait, self.instance)
                         break
             self._astack = astack.pop_all()
         return self
 
     async def __aexit__(self, *args):
-        await self._astack.aclose()
+        await self._astack.__aexit__(*args)
 
     # Start downloading file at self.url in chunks.
     async def run(self, remaining_chunks: Iterator[int], size_bytes: int):
@@ -104,5 +105,6 @@ class TorInstance:
 
     async def acquire_url(self, open_url) -> bool:
         self.open_chromium(open_url)
-        self.url = await ainput("Enter the download link (or press Enter to retry): ")
+        sess = PromptSession() # TODO: wow this is disgusting
+        self.url = await sess.prompt_async("Enter the download link (or press Enter to retry): ")
         return self.url != ""

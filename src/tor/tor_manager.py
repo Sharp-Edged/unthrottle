@@ -3,7 +3,6 @@ from . import TorInstance
 from config import TORRC_TEMPLATE_PATH, CHUNK_BYTES
 from utils import ceil_div
 from contextlib import AsyncExitStack
-from rich.progress import track
 import asyncio
 
 class TorManager:
@@ -27,7 +26,7 @@ class TorManager:
         return self
 
     async def __aexit__(self, *args):
-        await self._astack.aclose()
+        await self._astack.__aexit__(*args)
         
     async def spawn_instance(self):
         i = len(self.instances)
@@ -38,14 +37,12 @@ class TorManager:
         if self.instances == []:
             self.file_size_bytes = await instance.content_length()
             num_chunks = ceil_div(self.file_size_bytes, CHUNK_BYTES)
-            # self.remaining_chunks = iter(track(range(num_chunks)))
             self.remaining_chunks = iter(range(num_chunks))
 
         self.instances.append(instance)
         self.tasks += [asyncio.create_task(instance.run(self.remaining_chunks, self.file_size_bytes))]
 
     def list_instances(self):
-        print("HERE")
         if self.instances == []:
             print("No currently running tor instances.")
         else:

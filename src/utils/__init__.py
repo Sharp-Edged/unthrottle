@@ -10,6 +10,3 @@ def file_size_to_bytes(file_size: str) -> int:
 def ceil_div(n: int, d: int) -> int:
     # funny hack
     return -(n // -d)
-
-async def ainput(prompt: str = "") -> str:
-    return await asyncio.to_thread(input, prompt)
