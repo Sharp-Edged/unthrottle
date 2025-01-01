@@ -27,3 +27,5 @@ The only way is to use Tor.
 
 Currently only keep2share works. Will add more file hosting services soon (+ a "manual" option to download from unsupported
 services).
+
+Ass covering: This is only for educational purposes.
