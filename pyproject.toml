@@ -13,6 +13,7 @@ dependencies = [
     "nest-asyncio>=1.6.0",
     "playwright>=1.49.1",
     "prompt-toolkit>=3.0.48",
+    "rich>=13.9.4",
 ]
 
 [project.scripts]

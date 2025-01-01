@@ -1,5 +1,6 @@
+import asyncio
 from tor import TorManager
-from config import DOWNLOAD_PATH
+from config import CHUNK_BYTES, DOWNLOAD_PATH
 from prompt_toolkit import PromptSession
 import shutil
 
@@ -23,6 +24,7 @@ class UnthrottleShell:
         self.prompt_session = PromptSession(self.prompt)
 
     async def __aenter__(self):
+        await self.do_clean()
         await self.tor_manager.__aenter__()
         return self
 
@@ -45,30 +47,52 @@ class UnthrottleShell:
         else:
             print("No such function.")
 
-    async def do_ls(self):
+    async def do_status(self):
         """
-        List all running tor instances.
+        Print the status of all running instances.
         """
-        self.tor_manager.list_instances()
+        self.tor_manager.print_status()
 
-    async def do_sp(self):
+    async def do_spawn(self):
         """
         Spawns a new tor instance.
-        After spawning, opens Chromium at the provided URL using it as a proxy.
-        Now, you will have to navigate the opened tab and get to the proper download link.
-        Copy the download URL and close chromium.
-        Paste the copied link into the prompt.
-        """
-        await self.tor_manager.spawn_instance()
+        After spawning, opens a new browser tab at the provided URL using it as a proxy.
+        The script should automatically navigate up to the point of the CAPTCHA.
+        After solving the CAPTCHA (or if there was no CAPTCHA) it will fetch the link and close the tab.
 
-    async def do_cl(self):
+        You can manually close the tab to regenerate the proxy in case something goes wrong - like the
+        page blocking you from getting to the download link or the countdown timer being too long.
+        """
+        asyncio.create_task(self.tor_manager.spawn_instance())
+
+    async def do_clear(self):
         """
         Clears all the downloaded chunks.
         Should be called every time you change the file you are downloading.
         """
-        # Slightly nasty but IDC rn :shrug:
-        shutil.rmtree(DOWNLOAD_PATH) # await?
-        DOWNLOAD_PATH.mkdir()
+        ans = await self.prompt_session.prompt_async("Are you sure you want to clear the downloaded data? (y/N): ")
+        if ans.lower() in ['y', 'yes']:
+            # Slightly nasty but IDC rn :shrug:
+            shutil.rmtree(DOWNLOAD_PATH) # await?
+            DOWNLOAD_PATH.mkdir()
+
+    async def do_clean(self):
+        """
+        Cleans up incorrectly downloaded chunks.
+        """
+        for f in DOWNLOAD_PATH.iterdir():
+            if not f.name.startswith("chunk"):
+                continue
+            if f.stat().st_size != CHUNK_BYTES:
+                print(f"Removing incorrect chunk {f.name.split(".")[1]}")
+                f.unlink()
+
+    # TODO: Implement
+    async def do_load(self):
+        """
+        Loads previously downloaded chunks.
+        """
+        self.tor_manager.load_chunks()
 
     async def do_help(self, arg):
         if arg:
@@ -83,11 +107,17 @@ class UnthrottleShell:
                 print(f"Command '{arg}' doesn't exist. Type ? to list commands.")
         else:
             print("Available commands:")
-            print("  ls          List all active tor instances")
-            print("  sp          Spawn a new tor instance")
-            print("  cl          Clear all the downloaded chunks")
+            print("  list          List all active tor instances")
+            print("  spawn       Spawn a new tor instance")
+            print("  clear       Clear all the downloaded chunks")
             print("  help [cmd]  Show help information for <cmd>")
             print("  exit        Exit this shell")
+
+    async def do_collect(self):
+        """
+        Collects all the downloaded chunks into a single file.
+        """
+        self.tor_manager.collect_into_file("downloaded_file")
 
     async def do_wait(self):
         await self.tor_manager.wait_for_tasks()

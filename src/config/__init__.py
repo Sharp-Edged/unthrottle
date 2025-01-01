@@ -10,3 +10,6 @@ DOWNLOAD_PATH = DATA_PATH / "download"
 
 # We download the file in chunks of this many bytes
 CHUNK_BYTES = 256 * 1024
+
+# Chrome Debugging Protocol port
+CDP_PORT = 9222

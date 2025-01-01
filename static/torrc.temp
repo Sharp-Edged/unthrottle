@@ -10,3 +10,6 @@ Log notice syslog
 #RunAsDaemon 1
 
 DataDirectory $data_dir
+
+# Hopefully make the circuit last as long as possible.
+MaxCircuitDirtiness 86400
